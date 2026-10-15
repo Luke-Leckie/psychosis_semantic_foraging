@@ -12,7 +12,6 @@ from typing import Iterable, List, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
-from sentence_transformers import SentenceTransformer
 from scipy.ndimage import gaussian_filter1d
 from sklearn.metrics.pairwise import cosine_similarity
 from tqdm import tqdm
@@ -23,7 +22,6 @@ from tqdm import tqdm
 # ---------------------------------------------------------------------------
 
 SPAN = 20
-ELLIPSES_BREAK = True
 N_TOPICS = [125, 100, 75, 50]
 WINDOW_SIZES = [5,7,3]
 
@@ -31,13 +29,6 @@ WORKING_DIR = Path("/")
 FORAGING_SAVE_DIR = WORKING_DIR / "SZ_foraging_atoms"
 EMBEDDING_DIR = Path("")
 DATA_DIR = Path("")
-MODEL_DIR = Path(
-    f"/MODEL_DIR/"
-    f"{SPAN}_{int(SPAN * 0.2)}_SZ_MODEL"
-)
-
-FORAGING_SAVE_DIR.mkdir(parents=True, exist_ok=True)
-
 
 # ---------------------------------------------------------------------------
 # Helper functions
@@ -402,8 +393,8 @@ def main_seg(
 		all_mean_length.append(mean_length)
 		mean_atoms_visited.append(float(np.nanmean(atoms_per_cluster)) if atoms_per_cluster else np.nan)
 
-		all_within_clust_jumps.append(float(np.nanmedian(within_jumps)) if within_jumps else np.nan)
-		all_switching_jumps.append(float(np.nanmedian(switching_jumps)) if switching_jumps else np.nan)
+		all_within_clust_jumps.append(float(np.nanmean(within_jumps)) if within_jumps else np.nan)
+		all_switching_jumps.append(float(np.nanmean(switching_jumps)) if switching_jumps else np.nan)
 
 	df = df.copy()
 	df["noun_sim_states"] = noun_sim_states
@@ -426,31 +417,18 @@ class ProcessingConfig:
 	window_size: int
 
 	@property
-	def prefix(self) -> str:
-		return "" if ELLIPSES_BREAK else "nellip_"
-
-	@property
 	def preprefix(self) -> str:
 		return "sm_"
 
 
-def load_embeddings(prefix: str) -> List[Sequence[np.ndarray]]:
-	embedding_path = EMBEDDING_DIR / f"{prefix}IPII_utt_embeddings_{SPAN}.pkl"
+def load_embeddings() -> List[Sequence[np.ndarray]]:
+	embedding_path = EMBEDDING_DIR / f"IPII_utt_embeddings_{SPAN}.pkl"
 	with embedding_path.open("rb") as f:
 		return pickle.load(f)
 
 
-def build_age_dimension() -> np.ndarray:
-	sentence_model = SentenceTransformer(str(MODEL_DIR))
-	childhood_terms = ["young", "start", "past"]
-	old_age_terms = ["old", "end", "present"]
-	child_vecs = np.mean([sentence_model.encode(term) for term in childhood_terms], axis=0)
-	old_vecs = np.mean([sentence_model.encode(term) for term in old_age_terms], axis=0)
-	return old_vecs - child_vecs
-
-
-def process_config(cfg: ProcessingConfig, age_dimension: np.ndarray, verbose: bool = True, test_mode: bool = False) -> None:
-	csv_path = DATA_DIR / f"{cfg.prefix}IPIIs_censored_utterances_{cfg.n_topics}.csv"
+def process_config(cfg: ProcessingConfig, verbose: bool = True, test_mode: bool = False) -> None:
+	csv_path = DATA_DIR / f"IPIIs_censored_utterances_{cfg.n_topics}.csv"
 	df_texts = pd.read_csv(csv_path)
 	df_texts["utterances"] = df_texts["utterances"].apply(ast.literal_eval)
 	repetition_stats = df_texts["utterances"].apply(analyze_repetitions_per_row)
@@ -463,7 +441,7 @@ def process_config(cfg: ProcessingConfig, age_dimension: np.ndarray, verbose: bo
 		"repeat_ratio_contig",
 	]] = df_texts["atom_seq"].apply(seq_features)
 
-	embeddings = load_embeddings(cfg.prefix)
+	embeddings = load_embeddings()
 	if len(embeddings) != len(df_texts):
 		raise ValueError("Embedding list length does not match dataframe rows")
 
@@ -487,20 +465,19 @@ def process_config(cfg: ProcessingConfig, age_dimension: np.ndarray, verbose: bo
 
 	print(df_texts)
 	if not test_mode:
-		output_name = f"{cfg.preprefix}{cfg.prefix}utt_seg_means_{SPAN}_{cfg.window_size}_{cfg.n_topics}_clean.csv"
+		output_name = f"{cfg.preprefix}utt_seg_means_{SPAN}_{cfg.window_size}_{cfg.n_topics}_clean.csv"
+		FORAGING_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 		df_texts.to_csv(FORAGING_SAVE_DIR / output_name, index=False)
 
 
 def main(verbose: bool = True) -> None:
-	age_dimension = build_age_dimension()
-
 	for n_topics in N_TOPICS:
 		for window_size in WINDOW_SIZES:
 			cfg = ProcessingConfig(
 				n_topics=n_topics,
 				window_size=window_size,
 			)
-			process_config(cfg, age_dimension, verbose=verbose, test_mode=False)
+			process_config(cfg, verbose=verbose, test_mode=False)
 
 
 if __name__ == "__main__":
